@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+pydantic
+python-multipart
+pandas
+requests
+fpdf2
+pdfplumber
+PyPDF2
+python-dotenv
+beautifulsoup4
+lxml
+tls-client
+markdownify
+regex
