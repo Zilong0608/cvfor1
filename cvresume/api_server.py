@@ -330,6 +330,19 @@ def search_jobs_endpoint(params: JobSearchParams) -> JobSearchResponse:
     raise HTTPException(status_code=503, detail="Search did not complete. Please retry.")
 
 
+def _write_resume_files(data: ResumeData, output_dir: Path, job_lines: list[str]) -> None:
+    """Never include a partial/corrupt PDF in a batch download."""
+    pdf_path = output_dir / "resume.pdf"
+    docx_path = output_dir / "job_info.docx"
+    try:
+        render_pdf(data, pdf_path)
+        write_job_docx(docx_path, job_lines)
+    except Exception:
+        pdf_path.unlink(missing_ok=True)
+        docx_path.unlink(missing_ok=True)
+        raise
+
+
 @app.post("/api/resumes/zip")
 def generate_zip_endpoint(payload: GenerateZipRequest) -> StreamingResponse:
     if not payload.jobs:
@@ -339,6 +352,7 @@ def generate_zip_endpoint(payload: GenerateZipRequest) -> StreamingResponse:
     resume_context = build_resume_context(resume_data)
 
     errors: list[str] = []
+    generated = 0
     buffer = io.BytesIO()
 
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -390,8 +404,6 @@ def generate_zip_endpoint(payload: GenerateZipRequest) -> StreamingResponse:
             output_dir = root / folder_name
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            render_pdf(data_copy, output_dir / "resume.pdf")
-
             job_lines = [
                 f"Job Title: {title}",
                 f"Company: {company}",
@@ -402,7 +414,16 @@ def generate_zip_endpoint(payload: GenerateZipRequest) -> StreamingResponse:
                 "Description:",
                 description,
             ]
-            write_job_docx(output_dir / "job_info.docx", job_lines)
+            try:
+                _write_resume_files(data_copy, output_dir, job_lines)
+                generated += 1
+            except Exception as exc:
+                logging.getLogger("uvicorn.error").exception("Resume file generation failed")
+                errors.append(f"{idx:03d} {title or 'Untitled role'}: PDF generation failed ({type(exc).__name__}).")
+                continue
+
+        if generated == 0:
+            raise HTTPException(status_code=500, detail="No resume PDFs could be generated. Check the server PDF/font configuration and retry.")
 
         if errors:
             (root / "errors.txt").write_text("\n".join(errors), encoding="utf-8")
@@ -447,6 +468,7 @@ def generate_zip_stream(payload: GenerateZipStreamRequest) -> StreamingResponse:
         )
 
         errors: list[str] = []
+        generated = 0
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             for index in range(start, end):
@@ -511,8 +533,6 @@ def generate_zip_stream(payload: GenerateZipStreamRequest) -> StreamingResponse:
                 output_dir = root / folder_name
                 output_dir.mkdir(parents=True, exist_ok=True)
 
-                render_pdf(data_copy, output_dir / "resume.pdf")
-
                 job_lines = [
                     f"Job Title: {title}",
                     f"Company: {company}",
@@ -523,9 +543,23 @@ def generate_zip_stream(payload: GenerateZipStreamRequest) -> StreamingResponse:
                     "Description:",
                     description,
                 ]
-                write_job_docx(output_dir / "job_info.docx", job_lines)
+                try:
+                    _write_resume_files(data_copy, output_dir, job_lines)
+                    generated += 1
+                except Exception as exc:
+                    logging.getLogger("uvicorn.error").exception("Resume file generation failed")
+                    message = f"[{index + 1}/{total}] PDF generation failed ({type(exc).__name__})."
+                    errors.append(message)
+                    yield _ndjson({"type": "log", "message": message})
 
                 yield _ndjson({"type": "progress", "current": index + 1, "total": total})
+
+            if generated == 0:
+                yield _ndjson({"type": "error", "message": "No resume PDFs could be generated. Check the server PDF/font configuration and retry."})
+                return
+
+            failed = end - start - generated
+            yield _ndjson({"type": "log", "message": f"Generated {generated} resumes; {failed} failed. See errors.txt in the ZIP for any failures."})
 
             if errors:
                 (root / "errors.txt").write_text("\n".join(errors), encoding="utf-8")
@@ -552,6 +586,8 @@ def generate_zip_stream(payload: GenerateZipStreamRequest) -> StreamingResponse:
                 "start": start,
                 "end": end,
                 "count": end - start,
+                "generated": generated,
+                "failed": failed,
                 "total": total,
             }
         )

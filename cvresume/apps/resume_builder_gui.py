@@ -788,6 +788,10 @@ def extract_header_info(text: str) -> tuple[str, str, str]:
 
 def find_cjk_font() -> Path | None:
     candidates = [
+        # Always ship the same Unicode font on Render/Linux and on desktops.
+        Path(__file__).resolve().parents[1] / "assets" / "fonts" / "NotoSansSC-Regular.ttf",
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         Path(r"C:\Windows\Fonts\msyh.ttc"),
         Path(r"C:\Windows\Fonts\msyh.ttf"),
         Path(r"C:\Windows\Fonts\simsun.ttc"),
@@ -803,12 +807,8 @@ def find_cjk_font() -> Path | None:
 def _write_line(pdf, text: str) -> None:
     if not text:
         return
-    try:
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 5, text)
-    except TypeError:
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 5, text)
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 5, text)
 
 
 def _split_to_lines(pdf, text: str, width: float) -> list[str]:
@@ -821,8 +821,8 @@ def _split_to_lines(pdf, text: str, width: float) -> list[str]:
             return [text]
 
 
-def _write_centered_bold(pdf, text: str, font_name: str, size: int, line_height: int, force_fake_bold: bool) -> None:
-    pdf.set_font(font_name, "", size)
+def _write_centered_bold(pdf, text: str, font_name: str, size: int, line_height: int) -> None:
+    pdf.set_font(font_name, "B", size)
     usable_width = pdf.w - pdf.l_margin - pdf.r_margin
     lines = _split_to_lines(pdf, text, usable_width)
     start_y = pdf.get_y()
@@ -830,14 +830,8 @@ def _write_centered_bold(pdf, text: str, font_name: str, size: int, line_height:
         y = start_y + (idx + 1) * line_height
         line_width = pdf.get_string_width(line)
         x = pdf.l_margin + max((usable_width - line_width) / 2, 0)
-        if force_fake_bold:
-            # Overprinting duplicates characters in PDF extraction and ATS readers.
-            # The CJK family is registered for B as well; emit each glyph once.
-            pdf.set_font(font_name, "B", size)
-            pdf.text(x, y, line)
-        else:
-            pdf.set_font(font_name, "B", size)
-            pdf.text(x, y, line)
+        # Emit each glyph once so PDF extraction and ATS readers see clean text.
+        pdf.text(x, y, line)
     pdf.set_y(start_y + len(lines) * line_height)
 
 
@@ -887,15 +881,18 @@ def render_pdf(data: ResumeData, output_path: Path) -> None:
     pdf.add_page()
     pdf.set_margins(15, 15, 15)
 
-    font_name = "Helvetica"
     cjk_font = find_cjk_font()
-    if cjk_font:
-        pdf.add_font("CJK", "", str(cjk_font))
-        pdf.add_font("CJK", "B", str(cjk_font))
-        font_name = "CJK"
+    if cjk_font is None:
+        raise RuntimeError("PDF Unicode font is missing. Redeploy with cvresume/assets/fonts included.")
+    bold_font = cjk_font.with_name("NotoSansSC-Bold.ttf")
+    if not bold_font.is_file():
+        bold_font = cjk_font
+    pdf.add_font("CJK", "", str(cjk_font))
+    pdf.add_font("CJK", "B", str(bold_font))
+    font_name = "CJK"
 
     if data.name:
-        _write_centered_bold(pdf, safe_text(data.name), font_name, 16, 8, force_fake_bold=font_name == "CJK")
+        _write_centered_bold(pdf, safe_text(data.name), font_name, 16, 8)
 
     pdf.set_font(font_name, "", 10)
     contact = " | ".join(part for part in [data.phone, data.email] if part)
@@ -971,7 +968,7 @@ def render_pdf(data: ResumeData, output_path: Path) -> None:
 
 def add_heading(pdf, text: str, font_name: str) -> None:
     pdf.ln(4)
-    _write_centered_bold(pdf, text, font_name, 11, 6, force_fake_bold=font_name == "CJK")
+    _write_centered_bold(pdf, text, font_name, 11, 6)
     x_left = pdf.l_margin
     x_right = pdf.w - pdf.r_margin
     y = pdf.get_y() + 1

@@ -9,6 +9,15 @@ uvicorn api_server:app --host 0.0.0.0 --port $PORT
 
 Set the Render health check path to `/api/health`.
 
+PDF generation uses the bundled Noto Sans SC regular/bold fonts in
+`assets/fonts`; keep these assets in the backend deployment. They support
+Chinese and common Unicode punctuation such as en/em dashes and smart quotes.
+No Windows fonts, runtime font downloads, or additional Render settings are
+needed. The font license and source attribution are included beside the fonts.
+If an individual PDF fails, successful resumes are still packaged with an
+`errors.txt` report. If no PDF succeeds, generation returns an explicit error
+and leaves the batch available for retry instead of advertising an empty ZIP.
+
 The frontend build remains `npm ci && npm run build` from `cvresume/frontend`;
 publish `build`. For a separately hosted backend, set `VITE_API_BASE_URL` to
 `https://YOUR-BACKEND.onrender.com/api` **before building the frontend**.
