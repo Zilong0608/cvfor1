@@ -35,6 +35,7 @@ Output:
 Style & structure:
 - Use this structure: who you are -> core technical direction -> problems you solve/value -> suitable role.
 - Third-person tone (e.g., "Full-stack oriented software engineer...").
+- Use a professional noun phrase; do not infer gender or use personal pronouns.
 - No headings, no bullets, no quotes, plain text only.
 - When job requirements/skills are provided, highlight ONLY the ones supported by resume_context.
 

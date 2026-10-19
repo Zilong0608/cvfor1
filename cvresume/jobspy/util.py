@@ -74,6 +74,7 @@ class RequestsRotating(RotatingProxySession, requests.Session):
             self.mount("https://", adapter)
 
     def request(self, method, url, **kwargs):
+        kwargs.setdefault("timeout", (5, 12))
         if self.clear_cookies:
             self.cookies.clear()
 
@@ -92,6 +93,7 @@ class TLSRotating(RotatingProxySession, tls_client.Session):
         tls_client.Session.__init__(self, random_tls_extension_order=True)
 
     def execute_request(self, *args, **kwargs):
+        kwargs.setdefault("timeout_seconds", 12)
         if self.proxy_cycle:
             next_proxy = next(self.proxy_cycle)
             if next_proxy["http"] != "http://localhost":

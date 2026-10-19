@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { ScrollArea } from './ui/scroll-area';
 import { downloadZip } from '../lib/api';
 import { CACHE_KEYS, readCache, writeCache } from '../lib/cache';
-import type { GenerationBatch } from '../lib/types';
+import type { GenerationBatch, ResumeData } from '../lib/types';
 
 interface ResumeGenerationProps {
   onBack: () => void;
@@ -60,6 +60,7 @@ export function ResumeGeneration({ onBack, onNext, language, theme }: ResumeGene
   const isDark = theme === 'dark';
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState('');
+  const resume = readCache<ResumeData | null>(CACHE_KEYS.resumeData, null);
   const [latestBatch, setLatestBatch] = useState<GenerationBatch | null>(null);
 
   useEffect(() => {
@@ -223,87 +224,44 @@ export function ResumeGeneration({ onBack, onNext, language, theme }: ResumeGene
                       }
                   `}>
                       <div className="max-w-lg mx-auto space-y-8 font-serif">
-                        <div>
-                          <h1 className={`text-3xl font-bold mb-3 ${isDark ? 'text-white' : 'text-[#1A1A1A]'}`}>Zilong Guo</h1>
-                          <div className={`text-[10px] font-medium tracking-wide border-b pb-6 mb-6 ${isDark ? 'text-gray-400 border-white/20' : 'text-gray-500 border-black'}`}>
-                            0423 570 272 | excalibur8680608@gmail.com | 8680608
+                        <p className="text-xs font-sans">
+                          {language === 'zh'
+                            ? '\u5df2\u786e\u8ba4\u7684\u7b80\u5386\u8d44\u6599\u9884\u89c8\u3002\u5404\u804c\u4f4d\u7684\u5b9a\u5236\u7b80\u5386\u8bf7\u67e5\u770b ZIP \u4e2d\u7684 PDF\u3002'
+                            : 'Confirmed resume details. See the PDFs in the ZIP for each job-specific summary.'}
+                        </p>
+                        {resume ? <>
+                          <div>
+                            <h1 className="text-3xl font-bold">{resume.name}</h1>
+                            <p className="text-xs">{resume.contact}</p>
                           </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-white' : 'text-[#1A1A1A]'}`}>{t[language].intro}</h3>
-                          <div className={`h-[1px] w-8 mb-3 ${isDark ? 'bg-white' : 'bg-black'}`}></div>
-                          <p className={`text-[11px] leading-relaxed text-justify font-sans ${isDark ? 'text-gray-400' : 'text-gray-700'}`}>
-                            Technology professional with a foundation in computer science, data science, and AI, experienced in software development, data processing, and evaluating language model behavior. Proficient in Python and JavaScript, with experience building lightweight prototypes and automating workflows.
-                          </p>
-                        </div>
-
-                        <div className="space-y-4">
-                          <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-white' : 'text-[#1A1A1A]'}`}>{t[language].workExp}</h3>
-                          <div className={`h-[1px] w-8 mb-4 ${isDark ? 'bg-white' : 'bg-black'}`}></div>
-                          
-                          <div className="space-y-5 font-sans">
-                            <div>
-                              <div className="flex justify-between items-baseline mb-1">
-                                <div className={`font-bold text-xs ${isDark ? 'text-gray-200' : 'text-[#1A1A1A]'}`}>WhiteMirror</div>
-                                <div className="text-[10px] text-gray-500 font-medium italic">2025 - Present</div>
-                              </div>
-                              <div className={`text-[11px] font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>AI Intern</div>
-                              <ul className={`list-disc list-inside text-[10px] space-y-1.5 ml-1 leading-normal ${isDark ? 'text-gray-500' : 'text-gray-600'}`}>
-                                <li>Assisted in testing, evaluating, and refining AI and language model behaviours.</li>
-                                <li>Conducted prompt analysis, experiment design, and documentation preparation.</li>
-                                <li>Collaborated with cross-functional teams to implement AI-driven solutions.</li>
-                              </ul>
-                            </div>
-                            {/* More fake content to make it scrollable */}
-                            <div>
-                              <div className="flex justify-between items-baseline mb-1">
-                                <div className={`font-bold text-xs ${isDark ? 'text-gray-200' : 'text-[#1A1A1A]'}`}>TechSolutions Ltd</div>
-                                <div className="text-[10px] text-gray-500 font-medium italic">2023 - 2024</div>
-                              </div>
-                              <div className={`text-[11px] font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Software Engineer</div>
-                              <ul className={`list-disc list-inside text-[10px] space-y-1.5 ml-1 leading-normal ${isDark ? 'text-gray-500' : 'text-gray-600'}`}>
-                                <li>Developed scalable web applications using React and Node.js.</li>
-                                <li>Implemented CI/CD pipelines to streamline deployment processes.</li>
-                                <li>Worked in an agile environment with daily stand-ups and sprint planning.</li>
-                              </ul>
-                            </div>
-                            <div>
-                              <div className="flex justify-between items-baseline mb-1">
-                                <div className={`font-bold text-xs ${isDark ? 'text-gray-200' : 'text-[#1A1A1A]'}`}>DataCorp</div>
-                                <div className="text-[10px] text-gray-500 font-medium italic">2021 - 2023</div>
-                              </div>
-                              <div className={`text-[11px] font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Data Analyst</div>
-                              <ul className={`list-disc list-inside text-[10px] space-y-1.5 ml-1 leading-normal ${isDark ? 'text-gray-500' : 'text-gray-600'}`}>
-                                <li>Analyzed large datasets to identify trends and patterns.</li>
-                                <li>Created interactive dashboards using Tableau and Power BI.</li>
-                                <li>Automated data cleaning processes using Python scripts.</li>
-                              </ul>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-4">
-                          <h3 className={`font-bold text-sm uppercase tracking-wider ${isDark ? 'text-white' : 'text-[#1A1A1A]'}`}>{t[language].education}</h3>
-                          <div className={`h-[1px] w-8 mb-4 ${isDark ? 'bg-white' : 'bg-black'}`}></div>
-                          <div className="space-y-4 font-sans">
-                            <div>
-                              <div className="flex justify-between items-baseline mb-1">
-                                <div className={`font-bold text-xs ${isDark ? 'text-gray-200' : 'text-[#1A1A1A]'}`}>University of New South Wales</div>
-                                <div className="text-[10px] text-gray-500 font-medium italic">2023 - Present</div>
-                              </div>
-                              <div className={`text-[11px] ${isDark ? 'text-gray-400' : 'text-gray-700'}`}>Master of IT (AI Specialisation)</div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between items-baseline mb-1">
-                                <div className={`font-bold text-xs ${isDark ? 'text-gray-200' : 'text-[#1A1A1A]'}`}>University of Melbourne</div>
-                                <div className="text-[10px] text-gray-500 font-medium italic">2019 - 2022</div>
-                              </div>
-                              <div className={`text-[11px] ${isDark ? 'text-gray-400' : 'text-gray-700'}`}>Bachelor of Science (Computer Science)</div>
-                            </div>
-                          </div>
-                        </div>
-
+                          <section>
+                            <h3 className="font-bold">{t[language].intro}</h3>
+                            <p className="text-sm whitespace-pre-wrap">{resume.intro}</p>
+                          </section>
+                          {resume.skills.length > 0 && <section>
+                            <h3 className="font-bold">{language === 'zh' ? '\u6280\u80fd' : 'Skills'}</h3>
+                            <p className="text-sm">{resume.skills.join(' ? ')}</p>
+                          </section>}
+                          <section>
+                            <h3 className="font-bold">{t[language].workExp}</h3>
+                            {resume.experience.map((entry, index) => <div key={index} className="my-4 text-sm">
+                              <strong>{entry.role} ? {entry.company}</strong>
+                              <p>{entry.period}</p>
+                              <ul className="list-disc pl-4">{entry.details.map((detail, i) => <li key={i}>{detail}</li>)}</ul>
+                            </div>)}
+                          </section>
+                          <section>
+                            <h3 className="font-bold">{t[language].education}</h3>
+                            {resume.education.map((entry, index) => <div key={index} className="my-4 text-sm">
+                              <strong>{entry.school}</strong><p>{entry.degree}</p><p>{entry.period}</p>
+                            </div>)}
+                          </section>
+                          {(['certifications', 'community', 'additional', 'languages'] as const).map((field) =>
+                            resume[field]?.length ? <section key={field}>
+                              <h3 className="font-bold capitalize">{field}</h3>
+                              <ul className="text-sm list-disc pl-4">{resume[field]!.map((value, index) => <li key={index}>{value}</li>)}</ul>
+                            </section> : null)}
+                        </> : <p>No resume data. Return to Step 1 to upload your resume.</p>}
                       </div>
                   </div>
               </div>

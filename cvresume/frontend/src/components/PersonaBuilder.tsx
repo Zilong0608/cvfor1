@@ -7,8 +7,8 @@ import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
 import { motion, AnimatePresence } from 'motion/react';
-import { parseResume } from '../lib/api';
-import { CACHE_KEYS, readCache, writeCache } from '../lib/cache';
+import { parseResume, warmBackend } from '../lib/api';
+import { CACHE_KEYS, readCache, writeCache, clearCache, invalidateGeneration } from '../lib/cache';
 import type { ResumeData } from '../lib/types';
 
 interface PersonaBuilderProps {
@@ -85,7 +85,19 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
   const [showDetails, setShowDetails] = useState(Boolean(cachedPersona));
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [serverReady, setServerReady] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
+    warmBackend(controller.signal).then((ready) => {
+      if (!controller.signal.aborted) setServerReady(ready);
+    });
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, []);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [uploadRevision, setUploadRevision] = useState(0);
   const [fileName, setFileName] = useState(cachedFileName);
 
   const [personaData, setPersonaData] = useState<ResumeData>(
@@ -93,14 +105,35 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
+  const savedResume = useRef(JSON.stringify(cachedPersona));
+
+  useEffect(() => () => { analysisAbortRef.current?.abort(); }, []);
 
   useEffect(() => {
     if (!isComplete) return;
+    const serialized = JSON.stringify(personaData);
+    if (savedResume.current !== serialized) {
+      invalidateGeneration();
+      savedResume.current = serialized;
+    }
     writeCache(CACHE_KEYS.resumeData, personaData);
   }, [personaData, isComplete]);
 
   const handleFileSelect = (file: File | null) => {
     if (!file) return;
+    analysisAbortRef.current?.abort();
+    setIsAnalyzing(false);
+    setIsComplete(false);
+    setShowDetails(false);
+    setIsEditing(false);
+    setPersonaData(defaultPersonaData);
+    setUploadRevision(revision => revision + 1);
+    savedResume.current = JSON.stringify(null);
+    setWarnings([]);
+    setError('');
+    clearCache([CACHE_KEYS.resumeData]);
+    invalidateGeneration();
     setResumeFile(file);
     setFileName(file.name);
     writeCache(CACHE_KEYS.resumeFileName, file.name);
@@ -112,17 +145,30 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
       return;
     }
     setError("");
+    setWarnings([]);
     setIsAnalyzing(true);
+    analysisAbortRef.current?.abort();
+    const controller = new AbortController();
+    analysisAbortRef.current = controller;
     try {
-      const parsed = await parseResume({ file: resumeFile });
+      const result = await parseResume({ file: resumeFile }, controller.signal);
+      if (controller.signal.aborted) return;
+      const parsed = result.resume;
+      setWarnings(result.warnings);
       setPersonaData(parsed);
       writeCache(CACHE_KEYS.resumeData, parsed);
       setIsComplete(true);
       setShowDetails(true);
     } catch (err: any) {
-      setError(err?.message || "Analyze failed.");
+      if (controller.signal.aborted) return;
+      setError(err?.name === "TimeoutError"
+        ? (language === "zh" ? "\u670d\u52a1\u5668\u542f\u52a8\u6216\u89e3\u6790\u8d85\u65f6\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002" : "Server startup or parsing timed out. Please retry shortly.")
+        : err?.message || "Analyze failed.");
     } finally {
-      setIsAnalyzing(false);
+      if (analysisAbortRef.current === controller) {
+        analysisAbortRef.current = null;
+        setIsAnalyzing(false);
+      }
     }
   };
 
@@ -406,7 +452,9 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
                       {isAnalyzing ? (
                         <span className={`flex items-center gap-2 relative z-10 ${isDark ? 'text-black' : 'text-gray-200'}`}>
                           <span className={`w-2 h-2 rounded-full animate-pulse ${isDark ? 'bg-black/80' : 'bg-white/80'}`}></span>
-                          {t[language].analyzing}
+                        {serverReady ? t[language].analyzing : (
+                          language === 'zh' ? '正在连接服务器并解析简历，请稍候…' : 'Connecting and reading your resume. Please wait…'
+                        )}
                         </span>
                       ) : isComplete ? (
                         <span className={`flex items-center gap-2 relative z-10 ${isDark ? 'text-black' : 'text-white'}`}><Check className={`w-5 h-5 ${isDark ? 'text-black' : 'text-white'}`} /> {t[language].complete}</span>
@@ -428,7 +476,7 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
               </ScrollArea>
 
               {/* Details Overlay */}
-              <AnimatePresence>
+            <AnimatePresence key={uploadRevision}>
                 {showDetails && (
                   <motion.div
                     initial={{ y: "100%" }}
@@ -446,7 +494,12 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
                     <ScrollArea className="flex-1 h-full w-full">
                       <div className="p-8 pb-24 space-y-8 max-w-xl mx-auto">
                          
-                         {/* Header Info */}
+                         {warnings.length > 0 && (
+                        <div role="status" className="text-sm p-3 border rounded-md">
+                          {language === 'zh' ? '\u672c\u6b21\u4f7f\u7528\u57fa\u7840\u89e3\u6790\uff0c\u8bf7\u4ed4\u7ec6\u6838\u5bf9\u5404\u5b57\u6bb5\u3002' : warnings.join(' ')}
+                        </div>
+                      )}
+                      {/* Header Info */}
                         <div>
                           {isEditing ? (
                             <div className="space-y-4 mb-6">
@@ -483,7 +536,7 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
                           {isEditing ? (
                             <Textarea 
                               value={personaData.intro}
-                              onChange={(e) => setPersonaData({...personaData, intro: e.target.value})}
+                              onChange={(e) => setPersonaData({...personaData, intro: e.target.value, summary: e.target.value})}
                               className={`text-sm leading-relaxed min-h-[150px] shadow-sm ${isDark ? 'bg-black/40 border-white/10 text-gray-300 rounded-none' : 'bg-white border-gray-200'}`}
                             />
                           ) : (
@@ -621,7 +674,18 @@ export function PersonaBuilder({ onBack, onNext, language, theme }: PersonaBuild
                           ))}
                         </div>
 
-                         {/* Action Area */}
+                         {(['skills', 'certifications', 'community', 'additional', 'languages'] as const).map((field) => (
+                        <section key={field} className="space-y-2">
+                          <h3 className="font-semibold capitalize">{field}</h3>
+                          {isEditing ? <Textarea
+                            value={(personaData[field] || []).join('\n')}
+                            onChange={(e) => setPersonaData({ ...personaData, [field]: e.target.value.split('\n') })}
+                          /> : <ul className="list-disc pl-4 text-sm">
+                            {(personaData[field] || []).map((item, index) => <li key={index}>{item}</li>)}
+                          </ul>}
+                        </section>
+                      ))}
+                      {/* Action Area */}
                          <div className="pt-4 flex justify-end gap-3">
                             <Button 
                               variant="ghost" 

@@ -31,6 +31,8 @@ export interface JobSearchParams {
   title: string;
   region?: string;
   country?: string;
+  expanded?: boolean;
+  results_per_site?: number;
 }
 
 export interface JobResult {
@@ -47,6 +49,7 @@ export interface JobSearchResponse {
   jobs: JobResult[];
   analysis?: string;
   total?: number;
+  warnings?: string[];
 }
 
 export interface GenerationBatch {

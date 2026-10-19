@@ -47,3 +47,11 @@ export function clearCache(keys: string[]): void {
     }
   });
 }
+
+export function invalidateGeneration(): void {
+  clearCache([
+    CACHE_KEYS.generationLogs, CACHE_KEYS.generationNextIndex,
+    CACHE_KEYS.generationTotal, CACHE_KEYS.generationBatches,
+    CACHE_KEYS.generationHasFirstBatch, CACHE_KEYS.zipName,
+  ]);
+}

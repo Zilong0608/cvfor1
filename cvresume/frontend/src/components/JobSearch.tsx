@@ -103,7 +103,7 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
     readCache<string[]>(CACHE_KEYS.generationLogs, [])
   );
   const [batchSize, setBatchSize] = useState<number>(
-    readCache<number>(CACHE_KEYS.generationBatchSize, 100)
+    readCache<number>(CACHE_KEYS.generationBatchSize, 10)
   );
   const [nextIndex, setNextIndex] = useState<number>(
     readCache<number>(CACHE_KEYS.generationNextIndex, 0)
@@ -165,7 +165,8 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
     };
   }, []);
 
-  const handleSearch = async () => {
+  const handleSearch = async (expanded = false) => {
+    if (!jobTitle.trim() || isSearching || isGenerating) return;
     if (searchAbortRef.current) {
       searchAbortRef.current.abort();
     }
@@ -174,6 +175,10 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
 
     setIsSearching(true);
     setHasResults(false);
+    setJobs([]);
+    setAnalysisText('');
+    writeCache(CACHE_KEYS.jobResults, []);
+    writeCache(CACHE_KEYS.jobAnalysis, '');
     setError('');
     setSearchLogs([]);
     writeCache(CACHE_KEYS.jobSearchLogs, []);
@@ -192,6 +197,8 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
       title: jobTitle,
       region,
       country,
+      expanded,
+      results_per_site: expanded ? 40 : 20,
     };
     writeCache(CACHE_KEYS.jobSearchParams, params);
 
@@ -207,11 +214,12 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
       await streamJobSearch(
         params,
         (payload) => {
+          if (controller.signal.aborted) return;
           if (payload?.type === 'log' && payload.message) {
             appendLog(payload.message);
             return;
           }
-          if (payload?.type === 'done') {
+          if (payload?.type === 'results' || payload?.type === 'done') {
             const jobsResult = payload.jobs || [];
             setJobs(jobsResult);
             setAnalysisText(payload.analysis || '');
@@ -222,7 +230,10 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
               setTotalJobs(payload.total);
               writeCache(CACHE_KEYS.generationTotal, payload.total);
             }
-            setIsSearching(false);
+            if (payload.type === 'done') {
+              for (const warning of payload.warnings || []) appendLog(warning);
+              setIsSearching(false);
+            }
             return;
           }
           if (payload?.type === 'error') {
@@ -237,12 +248,15 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
         setError(err?.message || 'Search failed.');
       }
     } finally {
-      searchAbortRef.current = null;
-      setIsSearching(false);
+      if (searchAbortRef.current === controller) {
+        searchAbortRef.current = null;
+        setIsSearching(false);
+      }
     }
   };
 
   const handleGenerateBatch = async () => {
+    if (isGenerating || isSearching) return;
     if (generateAbortRef.current) {
       generateAbortRef.current.abort();
     }
@@ -286,6 +300,7 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
           limit: batchSize,
         },
         async (payload) => {
+          if (controller.signal.aborted) return;
           if (payload?.type === 'log' && payload.message) {
             appendGenLog(payload.message);
             return;
@@ -325,7 +340,8 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
                 return next;
               });
               try {
-                const blob = await downloadZip(jobId);
+                const blob = await downloadZip(jobId, controller.signal);
+                if (controller.signal.aborted) return;
                 const url = window.URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
@@ -353,8 +369,10 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
         setError(err?.message || 'Generation failed.');
       }
     } finally {
-      generateAbortRef.current = null;
-      setIsGenerating(false);
+      if (generateAbortRef.current === controller) {
+        generateAbortRef.current = null;
+        setIsGenerating(false);
+      }
     }
   };
 
@@ -545,14 +563,14 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
             <div className="flex items-center gap-3 pt-4">
               {/* MIRROR TECH HUD BUTTON */}
               <Button 
-                onClick={handleSearch}
+                onClick={() => handleSearch(false)}
                 className={`relative overflow-hidden text-white border px-8 h-11 text-sm font-medium transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 group
                    ${isDark 
                       ? 'bg-white text-black border-white/20 hover:bg-gray-200 rounded-none' 
                       : 'bg-[#222224] border-white/10 rounded-lg'
                    }
                 `}
-                disabled={isSearching}
+                disabled={isSearching || isGenerating}
               >
                  {/* --- GEOMETRIC TECH OVERLAY --- */}
                       
@@ -576,7 +594,10 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
                 <span className={`relative z-10 ${isDark ? 'text-black' : 'text-white'}`}>{isSearching ? t[language].searching : t[language].startSearch}</span>
               </Button>
 
-              {/* Continue Search Button REMOVED as requested */}
+              <Button variant="outline" size="sm" onClick={() => handleSearch(true)}
+                disabled={isSearching || isGenerating || !jobTitle.trim()}>
+                {language === 'zh' ? '\u6269\u5c55\u641c\u7d22' : 'Expand Search'}
+              </Button>
 
               <Button
                 variant="ghost"
@@ -609,7 +630,7 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
               </Button>
             </div>
             
-            {hasResults && (
+            {hasResults && !isSearching && (
                <div className={`text-xs mt-2 flex items-center gap-2 font-medium w-fit px-3 py-1 border 
                    ${isDark ? 'bg-white/5 border-white/10 text-gray-400 rounded-none' : 'bg-gray-100/50 border-gray-200/50 text-gray-500 rounded-full'}
                `}>
@@ -683,12 +704,27 @@ export function JobSearch({ onBack, onNext, initialSearchTerm = '', language, th
                   <div className={`whitespace-pre-wrap text-sm leading-relaxed font-mono
                       ${isDark ? 'text-gray-300' : 'text-gray-700'}
                   `}>
-                      {analysisText || t[language].analysisContent}
+                      {analysisText}
                   </div>
               </div>
             )}
           </div>
 
+          {jobs.length > 0 && (
+            <ScrollArea className="h-48 border rounded-md p-3">
+              {jobs.map((job, index) => (
+                <div key={`${job.job_url || job.title}-${index}`} className="py-2 border-b">
+                  <div className="font-semibold">{job.title}</div>
+                  <div className="text-xs">{[job.company, job.location, job.site].filter(Boolean).join(' ? ')}</div>
+                  {job.job_url && /^https?:\/\//i.test(job.job_url) && (
+                    <a href={job.job_url} target="_blank" rel="noopener noreferrer" className="text-sm underline">
+                      {language === 'zh' ? '\u67e5\u770b\u804c\u4f4d' : 'View job'}
+                    </a>
+                  )}
+                </div>
+              ))}
+            </ScrollArea>
+          )}
           {/* Generation Area */}
           <div className="space-y-4">
             <div

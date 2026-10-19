@@ -49,6 +49,7 @@ def scrape_jobs(
     enforce_annual_salary: bool = False,
     verbose: int = 0,
     user_agent: str = None,
+    raise_on_error: bool = False,
     **kwargs,
 ) -> pd.DataFrame:
     """
@@ -127,6 +128,8 @@ def scrape_jobs(
             try:
                 site_value, scraped_data = future.result()
             except Exception as exc:
+                if raise_on_error:
+                    raise
                 create_logger("JobSpy").error(
                     f"{site.value} scrape failed: {exc}"
                 )

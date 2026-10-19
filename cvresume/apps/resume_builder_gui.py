@@ -178,7 +178,7 @@ def split_sections(text: str) -> dict[str, list[str]]:
         for key, names in headings.items():
             for name in sorted(names, key=len, reverse=True):
                 idx = lowered.find(name)
-                if idx == -1:
+                if idx != 0:
                     continue
                 before_ok = idx == 0 or not lowered[idx - 1].isalnum()
                 after_idx = idx + len(name)
@@ -199,9 +199,6 @@ def split_sections(text: str) -> dict[str, list[str]]:
         matched = None
         for key, names in headings.items():
             if any(lowered == name for name in names):
-                matched = key
-                break
-            if any(lowered.startswith(name) and len(lowered) <= len(name) + 6 for name in names):
                 matched = key
                 break
         if matched:
@@ -274,7 +271,7 @@ def _looks_like_school(line: str) -> bool:
 def _looks_like_degree(line: str) -> bool:
     return bool(
         re.search(
-            r"(?i)degree|bachelor|master|phd|doctor|diploma|certificate|program|programme|foundation|associate|bsc|bs|ba|msc|ms|ma|mba|meng|mphil|beng|b\.sc|m\.sc|b\.s|m\.s|b\.a|m\.a",
+            r"(?i)\b(?:degree|bachelor|master|phd|doctor|diploma|certificate|program|programme|foundation|associate|bsc|bs|ba|msc|ms|ma|mba|meng|mphil|beng|b\.sc|m\.sc|b\.s|m\.s|b\.a|m\.a)\b",
             line,
         )
     )
@@ -405,6 +402,9 @@ def parse_education(lines: Iterable[str]) -> list[EducationEntry]:
         if "," in piece:
             prefix, rest = [p.strip() for p in piece.split(",", 1)]
             if prefix and rest and _looks_like_degree(prefix):
+                if not _looks_like_school(rest):
+                    _assign_degree(piece)
+                    return
                 _assign_degree(prefix)
                 piece = rest
             elif prefix and rest and _looks_like_school(prefix):
@@ -458,6 +458,8 @@ def parse_education(lines: Iterable[str]) -> list[EducationEntry]:
 
         has_location = bool(re.search(r"[A-Za-z]+\s*,\s*[A-Za-z]+", line))
         line, found_dates = _extract_dates(line)
+        if current.degree and re.match(r"(?i)^(?:master|bachelor|foundation|phd|doctor|diploma|certificate|bsc|msc|mba)\b", line):
+            _flush()
         has_location = bool(re.search(r"[A-Za-z]+\s*,\s*[A-Za-z]+", line))
         if found_dates:
             if not line:
@@ -651,6 +653,8 @@ def parse_resume_text(text: str) -> ResumeData:
     sections = split_sections(text)
     name, phone, email = extract_header_info(text)
     summary_lines = [line for line in sections.get("summary", []) if line]
+    if name:
+        summary_lines = [line for line in summary_lines if line != name]
     if email:
         summary_lines = [line for line in summary_lines if email not in line]
     if phone:
@@ -731,13 +735,13 @@ def extract_header_info(text: str) -> tuple[str, str, str]:
     email_match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", text, re.IGNORECASE)
     if email_match:
         email = email_match.group(0)
-    phone_match = re.search(r"(?:\\+?\\d[\\d\\s().-]{7,}\\d)", text)
+    phone_match = re.search(r"(?:\+?\d[\d\s().-]{7,}\d)", text)
     if phone_match:
         phone = phone_match.group(0).strip()
     if not phone:
         for line in lines:
             if re.search(r"(?i)mobile|phone|tel", line):
-                digits = re.search(r"(?:\\+?\\d[\\d\\s().-]{7,}\\d)", line)
+                digits = re.search(r"(?:\+?\d[\d\s().-]{7,}\d)", line)
                 if digits:
                     phone = digits.group(0).strip()
                     break
@@ -775,7 +779,7 @@ def extract_header_info(text: str) -> tuple[str, str, str]:
             continue
         if "@" in line:
             continue
-        if re.search(r"[A-Za-z\\u4e00-\\u9fff]", line):
+        if re.search(r"[A-Za-z\u4e00-\u9fff]", line):
             if len(line.split()) <= 6:
                 name = line
                 break
@@ -801,7 +805,7 @@ def _write_line(pdf, text: str) -> None:
         return
     try:
         pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 5, text, wrapmode="CHAR")
+        pdf.multi_cell(0, 5, text)
     except TypeError:
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 5, text)
@@ -827,9 +831,10 @@ def _write_centered_bold(pdf, text: str, font_name: str, size: int, line_height:
         line_width = pdf.get_string_width(line)
         x = pdf.l_margin + max((usable_width - line_width) / 2, 0)
         if force_fake_bold:
-            pdf.set_font(font_name, "", size)
+            # Overprinting duplicates characters in PDF extraction and ATS readers.
+            # The CJK family is registered for B as well; emit each glyph once.
+            pdf.set_font(font_name, "B", size)
             pdf.text(x, y, line)
-            pdf.text(x + 0.3, y, line)
         else:
             pdf.set_font(font_name, "B", size)
             pdf.text(x, y, line)
@@ -904,9 +909,9 @@ def render_pdf(data: ResumeData, output_path: Path) -> None:
         add_heading(pdf, "Professional Summary", font_name)
         _write_line(pdf, safe_text(data.summary))
 
-        if data.skills:
-            add_heading(pdf, "Skills & Certifications", font_name)
-            _write_two_column_list(pdf, data.skills, font_name)
+    if data.skills:
+        add_heading(pdf, "Skills & Certifications", font_name)
+        _write_two_column_list(pdf, data.skills, font_name)
 
     if data.experience:
         add_heading(pdf, "Experience", font_name)
